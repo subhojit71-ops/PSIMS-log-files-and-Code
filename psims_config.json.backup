@@ -1,0 +1,73 @@
+{
+    "folders": {
+        "input_folder": "D:/Lupin_D360/Beta_Input",
+        "csv_output": "D:/Lupin_D360/Beta_Output2",
+        "results_output": "D:/Lupin_D360/Beta_Result"
+    },
+    "settings": {
+        "eligibility_mode": "relaxed",
+        "num_clusters": 7,
+        "require_engagement": false,
+        "zero_data_position": "first",
+        "naming_method": "combined",
+        "high_threshold": 30,
+        "low_threshold": 15,
+        "show_quality_metrics": true,
+        "generate_visualizations": true,
+        "scoring_config": {
+            "engagement": {
+                "email_open_weight": 0.5,
+                "email_click_weight": 0.5,
+                "whatsapp_read_weight": 0.5,
+                "whatsapp_click_weight": 0.5,
+                "call_productive_weight": 0.7,
+                "call_duration_weight": 0.3,
+                "final_email_weight": 0.33,
+                "final_whatsapp_weight": 0.33,
+                "final_call_weight": 0.33,
+                "max_score": 100,
+                "high_threshold": 30,
+                "low_threshold": 15
+            },
+            "academic": {
+                "publication_points_per_item": 10,
+                "publication_max_score": 50,
+                "trial_points_per_item": 20,
+                "trial_max_score": 30,
+                "association_points_per_item": 5,
+                "association_max_score": 20,
+                "max_score": 100,
+                "baseline_threshold": 10,
+                "high_threshold": 30,
+                "low_threshold": 10
+            },
+            "social_media": {
+                "follower_log_multiplier": 10,
+                "follower_max_score": 50,
+                "follower_min_threshold": 100,
+                "platform_points_per_item": 10,
+                "platform_max_score": 30,
+                "healthcare_platform_points_per_item": 10,
+                "healthcare_platform_max_score": 20,
+                "max_score": 100,
+                "high_threshold": 30,
+                "low_threshold": 15
+            },
+            "recognition": {
+                "award_points_per_item": 15,
+                "award_max_score": 30,
+                "press_points_per_item": 10,
+                "press_max_score": 25,
+                "event_points_per_item": 8,
+                "event_max_score": 25,
+                "association_points_per_item": 5,
+                "association_max_score": 20,
+                "max_score": 100,
+                "high_threshold": 30,
+                "low_threshold": 15
+            }
+        },
+        "admin_password_hash": "ce7068410c7b1b821234fd0562b350c5203dc94f0eb7abb4abb17a63056a4106"
+    },
+    "last_run": null
+}

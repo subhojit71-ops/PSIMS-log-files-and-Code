@@ -1,0 +1,153 @@
+================================================================================
+PSIMS ANALYSIS SUMMARY REPORT
+================================================================================
+
+Generated: 2025-12-10 15:33:22
+Eligibility Mode: STRICT
+Require Engagement: False
+Naming Method: combined
+Specialty Filter: All Specialties
+Thresholds: High=30, Low=15
+
+--------------------------------------------------------------------------------
+OVERALL STATISTICS
+--------------------------------------------------------------------------------
+Total Physicians: 10000
+Eligible for Clustering: 1722
+Insufficient Data: 8278
+
+--------------------------------------------------------------------------------
+DATA AVAILABILITY
+--------------------------------------------------------------------------------
+Engagement: 5293 (52.9%)
+Academic: 10000 (100.0%)
+Social Media: 10000 (100.0%)
+Recognition: 2911 (29.1%)
+
+--------------------------------------------------------------------------------
+SCORE STATISTICS
+--------------------------------------------------------------------------------
+
+Engagement:
+  Mean: 12.63
+  Median: 8.88
+  Std Dev: 14.11
+  Min: 0.00
+  Max: 61.72
+
+Academic:
+  Mean: 7.14
+  Median: 5.00
+  Std Dev: 8.71
+  Min: 5.00
+  Max: 100.00
+
+Social Media:
+  Mean: 16.54
+  Median: 10.00
+  Std Dev: 12.47
+  Min: 10.00
+  Max: 69.78
+
+Recognition:
+  Mean: 6.31
+  Median: 0.00
+  Std Dev: 13.30
+  Min: 0.00
+  Max: 100.00
+
+--------------------------------------------------------------------------------
+CLUSTER DETAILS
+--------------------------------------------------------------------------------
+
+Cluster 1: Low Activity Profile
+  Size: 4577 physicians (45.8%)
+  Avg Engagement: 1.75
+  Avg Academic: 5.43
+  Avg Social Media: 11.75
+  Avg Recognition: 1.64
+
+Cluster 2: Recognition-Focused
+  Size: 880 physicians (8.8%)
+  Avg Engagement: 12.38
+  Avg Academic: 7.13
+  Avg Social Media: 17.38
+  Avg Recognition: 37.98
+
+Cluster 3: Academic-Focused
+  Size: 314 physicians (3.1%)
+  Avg Engagement: 14.56
+  Avg Academic: 50.83
+  Avg Social Media: 22.69
+  Avg Recognition: 23.32
+
+Cluster 4: Social Media-Focused
+  Size: 1036 physicians (10.4%)
+  Avg Engagement: 13.98
+  Avg Academic: 6.31
+  Avg Social Media: 48.22
+  Avg Recognition: 7.06
+
+Cluster 5: Moderate Engagement
+  Size: 3193 physicians (31.9%)
+  Avg Engagement: 27.68
+  Avg Academic: 5.57
+  Avg Social Media: 12.30
+  Avg Recognition: 2.38
+
+--------------------------------------------------------------------------------
+CLUSTER QUALITY METRICS
+--------------------------------------------------------------------------------
+Silhouette Score: 0.520
+Quality: Good - Reasonable cluster structure
+
+--------------------------------------------------------------------------------
+ACTIVE SCORING PARAMETERS (WEIGHTS & THRESHOLDS)
+--------------------------------------------------------------------------------
+
+[ENGAGEMENT]
+  Email Open Weight: 0.6
+  Email Click Weight: 0.4
+  Whatsapp Read Weight: 0.4
+  Whatsapp Click Weight: 0.6
+  Call Productive Weight: 0.7
+  Call Duration Weight: 0.3
+  Final Email Weight: 0.34
+  Final Whatsapp Weight: 0.33
+  Final Call Weight: 0.33
+  Max Score: 100
+
+[ACADEMIC]
+  Publication Points Per Item: 10
+  Publication Max Score: 50
+  Trial Points Per Item: 19
+  Trial Max Score: 30
+  Association Points Per Item: 5
+  Association Max Score: 20
+  Max Score: 100
+  Baseline Threshold: 10
+
+[SOCIAL MEDIA]
+  Follower Log Multiplier: 10
+  Follower Max Score: 50
+  Follower Min Threshold: 100
+  Platform Points Per Item: 10
+  Platform Max Score: 30
+  Healthcare Platform Points Per Item: 10
+  Healthcare Platform Max Score: 20
+  Max Score: 100
+
+[RECOGNITION]
+  Award Points Per Item: 20
+  Award Max Score: 30
+  Press Points Per Item: 10
+  Press Max Score: 25
+  Event Points Per Item: 8
+  Event Max Score: 25
+  Association Points Per Item: 5
+  Association Max Score: 20
+  Max Score: 100
+
+================================================================================
+END OF REPORT
+================================================================================

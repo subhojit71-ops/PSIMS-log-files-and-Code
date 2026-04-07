@@ -1,0 +1,1241 @@
+"""
+PSIms Complete Unified System v2.1 - ALL BUGS FIXED
+Integrated file upload, validation, CSV conversion, and analytics with Tkinter UI
+
+Author: Subhoit Talukdar
+Version: 2.1 - Complete Bug Fixes
+- Fixed engagement score calculation (decimal to percentage conversion)
+- Fixed recognition/academic scores (only count non-empty rows)
+- Added eligibility mode selector in UI
+- Added clinic_city to output
+- Enhanced scoring weights (Option A)
+- Allows duplicate UINs in count-based sheets
+"""
+
+import pandas as pd
+import numpy as np
+import os
+import json
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk, scrolledtext
+from pathlib import Path
+from datetime import datetime
+import openpyxl
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import silhouette_score
+from difflib import SequenceMatcher
+import warnings
+warnings.filterwarnings('ignore')
+
+
+# =====================================================
+# CONFIGURATION MANAGER
+# =====================================================
+
+class PSImsConfig:
+    """Manages system configuration"""
+    
+    def __init__(self):
+        self.config_file = 'psims_config.json'
+        self.config = self.load_or_create()
+    
+    def load_or_create(self):
+        """Load config or create with default structure"""
+        default_config = {
+            'folders': {
+                'input_folder': '',
+                'csv_output': '',
+                'results_output': ''
+            },
+            'last_run': None
+        }
+        
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r') as f:
+                    loaded_config = json.load(f)
+                    
+                    if 'folders' not in loaded_config:
+                        loaded_config['folders'] = default_config['folders']
+                    else:
+                        for key in default_config['folders']:
+                            if key not in loaded_config['folders']:
+                                loaded_config['folders'][key] = ''
+                    
+                    return loaded_config
+            except (json.JSONDecodeError, KeyError, Exception) as e:
+                print(f"Warning: Config file corrupted, creating new one: {e}")
+                return default_config
+        
+        return default_config
+    
+    def save(self):
+        """Save configuration to file"""
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(self.config, f, indent=4)
+        except Exception as e:
+            print(f"Warning: Could not save config: {e}")
+    
+    def update_folder(self, key, path):
+        """Update folder path in config"""
+        if 'folders' not in self.config:
+            self.config['folders'] = {}
+        self.config['folders'][key] = path
+        self.save()
+    
+    def get_folder(self, key):
+        """Get folder path from config"""
+        if 'folders' not in self.config:
+            self.config['folders'] = {}
+        return self.config['folders'].get(key, '')
+
+
+# =====================================================
+# SCORING CONFIGURATION - ENHANCED (OPTION A)
+# =====================================================
+
+SCORING_CONFIG = {
+    'engagement': {
+        'email_open_weight': 0.50,
+        'email_click_weight': 0.50,
+        'whatsapp_read_weight': 0.50,
+        'whatsapp_click_weight': 0.50,
+        'call_productive_weight': 0.70,
+        'call_duration_weight': 0.30,
+        'final_email_weight': 0.33,
+        'final_whatsapp_weight': 0.33,
+        'final_call_weight': 0.34,
+        'max_score': 100
+    },
+    'academic': {
+        'publication_points_per_item': 10,
+        'publication_max_score': 50,
+        'trial_points_per_item': 20,
+        'trial_max_score': 30,
+        'association_points_per_item': 10,
+        'association_max_score': 20,
+        'max_score': 100
+    },
+    'social_media': {
+        'follower_log_multiplier': 10,
+        'follower_max_score': 50,
+        'follower_min_threshold': 100,
+        'platform_points_per_item': 10,
+        'platform_max_score': 30,
+        'healthcare_platform_points_per_item': 10,
+        'healthcare_platform_max_score': 20,
+        'max_score': 100
+    },
+    'recognition': {
+        'award_points_per_item': 15,
+        'award_max_score': 30,
+        'press_points_per_item': 10,
+        'press_max_score': 25,
+        'event_points_per_item': 8,
+        'event_max_score': 25,
+        'association_points_per_item': 5,
+        'association_max_score': 20,
+        'max_score': 100
+    }
+}
+
+
+# =====================================================
+# SMART EXCEL CONVERTER
+# =====================================================
+
+class SmartConverter:
+    """Intelligently combines and converts Excel files"""
+    
+    def __init__(self, output_folder, log_callback=None):
+        self.output_folder = output_folder
+        self.log = log_callback or print
+        self.warnings = []
+    
+    def standardize_name(self, name):
+        """Standardize names (lowercase, no spaces)"""
+        return name.strip().lower().replace(' ', '_').replace("'", "")
+    
+    def fuzzy_match(self, str1, str2, threshold=0.8):
+        """Fuzzy string matching"""
+        return SequenceMatcher(None, str1.lower(), str2.lower()).ratio() >= threshold
+    
+    def combine_pi_batches(self, pi_files):
+        """Combine multiple PI batch files - NO DEDUPLICATION"""
+        self.log("\n📊 Combining Personal Info Batches...")
+        
+        all_sheets_per_file = {}
+        for file in pi_files:
+            wb = openpyxl.load_workbook(file, read_only=True)
+            all_sheets_per_file[file] = wb.sheetnames
+            wb.close()
+            self.log(f"   {os.path.basename(file)}: {len(all_sheets_per_file[file])} sheets")
+        
+        master_sheets = all_sheets_per_file[pi_files[0]]
+        sheet_mapping = {sheet: [] for sheet in master_sheets}
+        
+        for file in pi_files:
+            file_sheets = all_sheets_per_file[file]
+            for master_sheet in master_sheets:
+                if master_sheet in file_sheets:
+                    sheet_mapping[master_sheet].append((file, master_sheet))
+                else:
+                    for file_sheet in file_sheets:
+                        if self.fuzzy_match(master_sheet, file_sheet):
+                            warning = f"Fuzzy match: '{master_sheet}' → '{file_sheet}' in {os.path.basename(file)}"
+                            self.warnings.append(warning)
+                            self.log(f"   ⚠️  {warning}")
+                            sheet_mapping[master_sheet].append((file, file_sheet))
+                            break
+        
+        # List of sheets that should ALLOW duplicate UINs (count-based)
+        COUNT_BASED_SHEETS = ['publication', 'trials', 'academic_association', 
+                             'awards', 'press', 'events', 'association']
+        
+        self.log("\n   📝 Combining sheets...")
+        for sheet_name, file_sheet_pairs in sheet_mapping.items():
+            if not file_sheet_pairs:
+                self.log(f"   ⚠️  No data found for sheet: {sheet_name}")
+                continue
+            
+            dfs = []
+            for file, actual_sheet_name in file_sheet_pairs:
+                try:
+                    df = pd.read_excel(file, sheet_name=actual_sheet_name)
+                    df.columns = [self.standardize_name(col) for col in df.columns]
+                    dfs.append(df)
+                    self.log(f"      ✓ {os.path.basename(file)} → {actual_sheet_name}: {len(df)} rows")
+                except Exception as e:
+                    self.log(f"      ❌ Error reading {actual_sheet_name} from {os.path.basename(file)}: {e}")
+            
+            if dfs:
+                combined = pd.concat(dfs, ignore_index=True)
+                
+                # CRITICAL: Only deduplicate PI and Clinics sheets
+                standardized_sheet = self.standardize_name(sheet_name)
+                if 'uin' in combined.columns:
+                    # Check if this is a count-based sheet
+                    is_count_based = any(cb_sheet in standardized_sheet for cb_sheet in COUNT_BASED_SHEETS)
+                    
+                    if not is_count_based and standardized_sheet in ['pi', 'clinics', 'digital', 'healthcare_platforms']:
+                        # Only deduplicate reference sheets
+                        before = len(combined)
+                        combined = combined.drop_duplicates(subset=['uin'], keep='last')
+                        after = len(combined)
+                        if before != after:
+                            self.log(f"         Removed {before - after} duplicate UINs (reference sheet)")
+                    else:
+                        self.log(f"         Kept all {len(combined)} rows (count-based sheet - allows duplicate UINs)")
+                
+                output_name = standardized_sheet + '.csv'
+                output_path = os.path.join(self.output_folder, output_name)
+                combined.to_csv(output_path, index=False, encoding='utf-8')
+                self.log(f"      ✓ Saved {output_name}: {len(combined)} rows, {len(combined.columns)} cols")
+    
+    def convert_engagement_files(self, engagement_files):
+        """Convert engagement files with standardized names"""
+        self.log("\n📅 Converting Engagement Files...")
+        
+        for file in engagement_files:
+            try:
+                df = pd.read_excel(file)
+                df.columns = [self.standardize_name(col) for col in df.columns]
+                
+                original_name = os.path.basename(file).replace('.xlsx', '').replace('.xls', '')
+                standardized_name = self.standardize_name(original_name) + '.csv'
+                
+                output_path = os.path.join(self.output_folder, standardized_name)
+                df.to_csv(output_path, index=False, encoding='utf-8')
+                
+                self.log(f"   ✓ {original_name} → {standardized_name}: {len(df)} rows")
+            except Exception as e:
+                self.log(f"   ❌ Failed to convert {os.path.basename(file)}: {e}")
+    
+    def get_warnings(self):
+        return self.warnings
+
+
+# =====================================================
+# PSIMS ANALYSIS ENGINE - COMPLETE WITH CONTINUATION
+# =====================================================
+
+class PSImsEngine:
+    """Core analytics engine with all bug fixes"""
+    
+    def __init__(self, csv_folder, output_folder, log_callback=None, eligibility_mode='relaxed'):
+        self.csv_folder = csv_folder
+        self.output_folder = output_folder
+        self.log = log_callback or print
+        self.data = {}
+        self.eligibility_mode = eligibility_mode
+        
+        self.eligibility_rules = {
+            'strict': {'min_buckets': 4, 'engagement_required': False},
+            'moderate': {'min_buckets': 3, 'engagement_required': False},
+            'relaxed': {'min_buckets': 2, 'engagement_required': False},
+            'basic': {'min_buckets': 1, 'engagement_required': False}
+        }
+    
+    def load_csv(self, filename):
+        """Safely load CSV"""
+        filepath = os.path.join(self.csv_folder, filename)
+        try:
+            if os.path.exists(filepath):
+                df = pd.read_csv(filepath, encoding='utf-8', low_memory=False)
+                return df
+            return pd.DataFrame()
+        except:
+            try:
+                return pd.read_csv(filepath, encoding='latin-1', low_memory=False)
+            except:
+                return pd.DataFrame()
+    
+    def standardize_uin_column(self, df, is_engagement=False):
+        """Standardize UIN column name to lowercase 'uin'"""
+        if df.empty:
+            return df
+        
+        for col in df.columns:
+            if col.lower() == 'uin':
+                if col != 'uin':
+                    df = df.rename(columns={col: 'uin'})
+                    if is_engagement:
+                        self.log(f"      Renamed '{col}' → 'uin'")
+                return df
+        
+        uin_variations = [
+            'Client doctor code', 'client doctor code', 'CLIENT DOCTOR CODE',
+            'Client_doctor_code', 'client_doctor_code', 'Client_Doctor_Code',
+            'ClientDoctorCode', 'clientdoctorcode',
+            'Doctor Code', 'doctor code', 'DOCTOR CODE',
+            'Doctor_Code', 'doctor_code',
+            'DoctorCode', 'doctorcode',
+            'doctor_id', 'DoctorID', 'DOCTORID', 'Doctor_ID',
+            'Client Code', 'client code', 'CLIENT CODE',
+            'Client_Code', 'client_code',
+            'id', 'ID', 'Id', '_id', '_ID'
+        ]
+        
+        for col in df.columns:
+            if col in uin_variations:
+                df = df.rename(columns={col: 'uin'})
+                if is_engagement:
+                    self.log(f"      Mapped '{col}' → 'uin' (exact match)")
+                return df
+        
+        for col in df.columns:
+            col_lower = col.lower().replace('_', '').replace(' ', '')
+            if any(term in col_lower for term in ['doctorcode', 'clientcode', 'doctorid', 'clientid']):
+                df = df.rename(columns={col: 'uin'})
+                if is_engagement:
+                    self.log(f"      Mapped '{col}' → 'uin' (fuzzy match)")
+                return df
+        
+        if is_engagement:
+            self.log(f"      ⚠️ Could not find UIN column")
+            self.log(f"      Available columns: {list(df.columns)}")
+        
+        return df
+    
+    def standardize_engagement_columns(self, df):
+        """Standardize engagement metric column names"""
+        column_mappings = {
+            'HCP Email Open Rate': 'hcp_email_open_rate',
+            'HCP Email Click Rate': 'hcp_email_click_rate',
+            'Email Open Rate': 'hcp_email_open_rate',
+            'Email Click Rate': 'hcp_email_click_rate',
+            'HCP Whatsapp Read Rate': 'hcp_whatsapp_read_rate',
+            'HCP Whatsapp Click Rate': 'hcp_whatsapp_click_rate',
+            'Whatsapp Read Rate': 'hcp_whatsapp_read_rate',
+            'Whatsapp Click Rate': 'hcp_whatsapp_click_rate',
+            'HCP Call Productive Rate': 'hcp_call_productive_rate',
+            'Call Productive Rate': 'hcp_call_productive_rate',
+            'Average Duration Connected Calls': 'average_duration_connected_calls',
+            'Average Call Duration': 'average_duration_connected_calls',
+            'Call Duration': 'average_duration_connected_calls'
+        }
+        
+        rename_dict = {}
+        for col in df.columns:
+            if col in column_mappings:
+                rename_dict[col] = column_mappings[col]
+            else:
+                for original, standardized in column_mappings.items():
+                    if col.lower() == original.lower():
+                        rename_dict[col] = standardized
+                        break
+        
+        if rename_dict:
+            df = df.rename(columns=rename_dict)
+            self.log(f"      Standardized {len(rename_dict)} engagement columns")
+        
+        return df
+    
+    def load_all_data(self):
+        """Load all CSV files with better column name handling"""
+        self.log("\n📂 Loading Data Files...")
+        
+        files = {
+            'pi': 'pi.csv',
+            'clinics': 'clinics.csv',
+            'publications': 'publication.csv',
+            'trials': 'trials.csv',
+            'academic_associations': 'academic_association.csv',
+            'digital': 'digital.csv',
+            'healthcare_platforms': 'healthcare_platforms.csv',
+            'awards': 'awards.csv',
+            'press': 'press.csv',
+            'events': 'events.csv',
+            'associations': 'association.csv'
+        }
+        
+        for key, filename in files.items():
+            self.data[key] = self.load_csv(filename)
+            if not self.data[key].empty:
+                self.data[key] = self.standardize_uin_column(self.data[key])
+                if 'uin' in self.data[key].columns:
+                    self.log(f"   ✓ {key}: {len(self.data[key])} rows")
+                else:
+                    self.log(f"   ⚠️ {key}: Loaded but no UIN column found")
+                    self.data[key] = pd.DataFrame()
+        
+        engagement_files = [f for f in os.listdir(self.csv_folder) 
+                          if f.endswith('.csv') and any(month in f.lower() 
+                          for month in ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'])]
+        
+        engagement_dfs = []
+        for eng_file in engagement_files:
+            df = self.load_csv(eng_file)
+            if not df.empty:
+                self.log(f"   📋 {eng_file}: {len(df)} rows")
+                df = self.standardize_uin_column(df, is_engagement=True)
+                df = self.standardize_engagement_columns(df)
+                
+                if 'uin' in df.columns:
+                    engagement_dfs.append(df)
+                    self.log(f"      ✓ {df['uin'].nunique()} unique UINs found")
+                else:
+                    self.log(f"      ⚠️ No UIN column - skipping {eng_file}")
+        
+        if engagement_dfs:
+            combined = pd.concat(engagement_dfs, ignore_index=True)
+            
+            if 'uin' not in combined.columns:
+                self.log("   ❌ No UIN column in combined engagement data")
+                self.data['engagement'] = pd.DataFrame()
+                return
+            
+            self.log(f"   Combined engagement: {len(combined)} rows, {combined['uin'].nunique()} unique UINs")
+            
+            expected_cols = {
+                'hcp_email_open_rate': 0,
+                'hcp_email_click_rate': 0,
+                'hcp_whatsapp_read_rate': 0,
+                'hcp_whatsapp_click_rate': 0,
+                'hcp_call_productive_rate': 0,
+                'average_duration_connected_calls': 0
+            }
+            
+            for col, default in expected_cols.items():
+                if col not in combined.columns:
+                    combined[col] = default
+                    self.log(f"      Added missing column: {col}")
+                else:
+                    combined[col] = pd.to_numeric(combined[col], errors='coerce').fillna(default)
+            
+            agg_dict = {col: 'mean' for col in expected_cols.keys() if col in combined.columns}
+            
+            try:
+                self.data['engagement'] = combined.groupby('uin', as_index=False).agg(agg_dict)
+                self.log(f"   ✓ Engagement (averaged): {len(self.data['engagement'])} UINs")
+            except KeyError as e:
+                self.log(f"   ❌ Error grouping engagement data: {e}")
+                self.log(f"      Available columns: {combined.columns.tolist()}")
+                self.data['engagement'] = pd.DataFrame()
+        else:
+            self.log("   ⚠️ No engagement files found")
+            self.data['engagement'] = pd.DataFrame()
+    
+    def aggregate_by_uin(self):
+        """Aggregate all data sources by UIN - COUNT DUPLICATES"""
+        self.log("\n🔗 Aggregating by UIN...")
+        
+        if self.data['pi'].empty:
+            self.log("   ❌ No PI data")
+            return pd.DataFrame()
+        
+        master = self.data['pi'][['uin']].drop_duplicates().copy()
+        self.log(f"   Master: {len(master)} UINs")
+        
+        for metric in ['publication_count', 'trial_count', 'academic_association_count',
+                      'award_count', 'platform_count', 'total_followers',
+                      'healthcare_platform_count', 'press_count', 'event_count', 
+                      'association_count']:
+            master[metric] = 0
+        
+        # Publications - Count ALL rows with publication_type
+        if not self.data['publications'].empty and 'uin' in self.data['publications'].columns:
+            pubs_df = self.data['publications'].copy()
+            if 'publication_type' in pubs_df.columns:
+                pubs_df = pubs_df[pubs_df['publication_type'].notna() & (pubs_df['publication_type'] != '')]
+                self.log(f"      Filtered to {len(pubs_df)} rows with publication_type")
+            
+            if len(pubs_df) > 0:
+                pubs = pubs_df.groupby('uin').size().reset_index(name='publication_count')
+                master = master.merge(pubs, on='uin', how='left', suffixes=('', '_new'))
+                master['publication_count'] = master['publication_count_new'].fillna(0)
+                master.drop(['publication_count_new'], axis=1, errors='ignore', inplace=True)
+                self.log(f"   ✓ Publications: {(master['publication_count'] > 0).sum()} doctors, {master['publication_count'].sum():.0f} total")
+        
+        # Trials
+        if not self.data['trials'].empty and 'uin' in self.data['trials'].columns:
+            trials_df = self.data['trials'].copy()
+            trial_col = None
+            for col in ['trial_type', 'trial_id', 'trial_title']:
+                if col in trials_df.columns:
+                    trial_col = col
+                    break
+            
+            if trial_col:
+                trials_df = trials_df[trials_df[trial_col].notna() & (trials_df[trial_col] != '')]
+                self.log(f"      Filtered to {len(trials_df)} rows with {trial_col}")
+            
+            if len(trials_df) > 0:
+                trials = trials_df.groupby('uin').size().reset_index(name='trial_count')
+                master = master.merge(trials, on='uin', how='left', suffixes=('', '_new'))
+                master['trial_count'] = master['trial_count_new'].fillna(0)
+                master.drop(['trial_count_new'], axis=1, errors='ignore', inplace=True)
+                self.log(f"   ✓ Trials: {(master['trial_count'] > 0).sum()} doctors, {master['trial_count'].sum():.0f} total")
+        
+        # Academic Associations
+        if not self.data['academic_associations'].empty and 'uin' in self.data['academic_associations'].columns:
+            acad_df = self.data['academic_associations'].copy()
+            acad_col = None
+            for col in ['association_type', 'association_name', 'association_title']:
+                if col in acad_df.columns:
+                    acad_col = col
+                    break
+            
+            if acad_col:
+                acad_df = acad_df[acad_df[acad_col].notna() & (acad_df[acad_col] != '')]
+            
+            if len(acad_df) > 0:
+                acad = acad_df.groupby('uin').size().reset_index(name='academic_association_count')
+                master = master.merge(acad, on='uin', how='left', suffixes=('', '_new'))
+                master['academic_association_count'] = master['academic_association_count_new'].fillna(0)
+                master.drop(['academic_association_count_new'], axis=1, errors='ignore', inplace=True)
+                self.log(f"   ✓ Academic Assoc: {(master['academic_association_count'] > 0).sum()} doctors")
+        
+        # Awards
+        if not self.data['awards'].empty and 'uin' in self.data['awards'].columns:
+            awards_df = self.data['awards'].copy()
+            if 'award_level' in awards_df.columns:
+                awards_df = awards_df[awards_df['award_level'].notna() & (awards_df['award_level'] != '')]
+                self.log(f"      Filtered to {len(awards_df)} rows with award_level")
+            
+            if len(awards_df) > 0:
+                awards = awards_df.groupby('uin').size().reset_index(name='award_count')
+                master = master.merge(awards, on='uin', how='left', suffixes=('', '_new'))
+                master['award_count'] = master['award_count_new'].fillna(0)
+                master.drop(['award_count_new'], axis=1, errors='ignore', inplace=True)
+                self.log(f"   ✓ Awards: {(master['award_count'] > 0).sum()} doctors, {master['award_count'].sum():.0f} total")
+        
+        # Press
+        if not self.data['press'].empty and 'uin' in self.data['press'].columns:
+            press_df = self.data['press'].copy()
+            if 'press_type' in press_df.columns:
+                press_df = press_df[press_df['press_type'].notna() & (press_df['press_type'] != '')]
+                self.log(f"      Filtered to {len(press_df)} rows with press_type")
+            
+            if len(press_df) > 0:
+                press = press_df.groupby('uin').size().reset_index(name='press_count')
+                master = master.merge(press, on='uin', how='left', suffixes=('', '_new'))
+                master['press_count'] = master['press_count_new'].fillna(0)
+                master.drop(['press_count_new'], axis=1, errors='ignore', inplace=True)
+                self.log(f"   ✓ Press: {(master['press_count'] > 0).sum()} doctors, {master['press_count'].sum():.0f} total")
+        
+        # Events
+        if not self.data['events'].empty and 'uin' in self.data['events'].columns:
+            events_df = self.data['events'].copy()
+            if 'event_type' in events_df.columns:
+                events_df = events_df[events_df['event_type'].notna() & (events_df['event_type'] != '')]
+                self.log(f"      Filtered to {len(events_df)} rows with event_type")
+            
+            if len(events_df) > 0:
+                events = events_df.groupby('uin').size().reset_index(name='event_count')
+                master = master.merge(events, on='uin', how='left', suffixes=('', '_new'))
+                master['event_count'] = master['event_count_new'].fillna(0)
+                master.drop(['event_count_new'], axis=1, errors='ignore', inplace=True)
+                self.log(f"   ✓ Events: {(master['event_count'] > 0).sum()} doctors, {master['event_count'].sum():.0f} total")
+        
+        # Associations
+        if not self.data['associations'].empty and 'uin' in self.data['associations'].columns:
+            assoc_df = self.data['associations'].copy()
+            if 'association_type' in assoc_df.columns:
+                assoc_df = assoc_df[assoc_df['association_type'].notna() & (assoc_df['association_type'] != '')]
+                self.log(f"      Filtered to {len(assoc_df)} rows with association_type")
+            
+            if len(assoc_df) > 0:
+                assoc = assoc_df.groupby('uin').size().reset_index(name='association_count')
+                master = master.merge(assoc, on='uin', how='left', suffixes=('', '_new'))
+                master['association_count'] = master['association_count_new'].fillna(0)
+                master.drop(['association_count_new'], axis=1, errors='ignore', inplace=True)
+                self.log(f"   ✓ Associations: {(master['association_count'] > 0).sum()} doctors, {master['association_count'].sum():.0f} total")
+        
+        # Digital data
+        if not self.data['digital'].empty and 'uin' in self.data['digital'].columns:
+            digital_clean = self.data['digital'][(self.data['digital']['uin'].notna()) & 
+                                                 (self.data['digital']['uin'] != '')].copy()
+            if len(digital_clean) > 0:
+                if 'sm_channel' in digital_clean.columns:
+                    digital_clean = digital_clean[digital_clean['sm_channel'].notna() & (digital_clean['sm_channel'] != '')]
+                    agg_dict = {'platform_count': ('sm_channel', 'nunique')}
+                    if 'sm_followers' in digital_clean.columns:
+                        digital_clean['sm_followers'] = pd.to_numeric(digital_clean['sm_followers'], errors='coerce').fillna(0)
+                        agg_dict['total_followers'] = ('sm_followers', 'sum')
+                    digital = digital_clean.groupby('uin').agg(**agg_dict).reset_index()
+                else:
+                    digital = digital_clean.groupby('uin').size().reset_index(name='platform_count')
+                    digital['total_followers'] = 0
+                
+                master = master.merge(digital, on='uin', how='left', suffixes=('_old', ''))
+                master.drop([c for c in master.columns if c.endswith('_old')], axis=1, errors='ignore', inplace=True)
+                master['platform_count'] = master.get('platform_count', 0).fillna(0)
+                master['total_followers'] = master.get('total_followers', 0).fillna(0)
+                self.log(f"   ✓ Social Media: {(master['platform_count'] > 0).sum()} doctors")
+        
+        # Healthcare platforms
+        if not self.data['healthcare_platforms'].empty and 'uin' in self.data['healthcare_platforms'].columns:
+            hc = self.data['healthcare_platforms'].groupby('uin').size().reset_index(name='healthcare_platform_count')
+            master = master.merge(hc, on='uin', how='left', suffixes=('', '_new'))
+            master['healthcare_platform_count'] = master['healthcare_platform_count_new'].fillna(0)
+            master.drop(['healthcare_platform_count_new'], axis=1, errors='ignore', inplace=True)
+        
+        # Merge engagement
+        if not self.data['engagement'].empty:
+            merged = master.merge(self.data['engagement'], on='uin', how='left')
+            for col in ['hcp_email_open_rate', 'hcp_email_click_rate', 'hcp_whatsapp_read_rate',
+                       'hcp_whatsapp_click_rate', 'hcp_call_productive_rate', 
+                       'average_duration_connected_calls']:
+                if col in merged.columns:
+                    merged[col] = merged[col].fillna(0)
+        else:
+            merged = master.copy()
+            for col in ['hcp_email_open_rate', 'hcp_email_click_rate', 'hcp_whatsapp_read_rate',
+                       'hcp_whatsapp_click_rate', 'hcp_call_productive_rate', 
+                       'average_duration_connected_calls']:
+                merged[col] = 0
+        
+        # Merge PI details
+        if 'full_name' in self.data['pi'].columns:
+            pi_cols = ['uin'] + [c for c in ['full_name', 'mobile', 'whatsapp_phone', 
+                                             'email_id_1', 'specialty'] if c in self.data['pi'].columns]
+            merged = merged.merge(self.data['pi'][pi_cols].drop_duplicates('uin'), on='uin', how='left')
+        
+        # Merge clinic data (INCLUDING clinic_city)
+        if not self.data['clinics'].empty and 'uin' in self.data['clinics'].columns:
+            clinic_cols = ['uin'] + [c for c in ['clinic_address', 'clinic_city', 'clinic_state'] 
+                                    if c in self.data['clinics'].columns]
+            if len(clinic_cols) > 1:
+                merged = merged.merge(self.data['clinics'][clinic_cols].drop_duplicates('uin'), on='uin', how='left')
+                self.log(f"   ✓ Merged clinic data (including city)")
+        
+        merged.fillna(0, inplace=True)
+        return merged
+    
+    def calculate_scores(self, df):
+        """Calculate 4 bucket scores - FULLY FIXED"""
+        self.log("\n🎯 Calculating Scores...")
+        
+        # ENGAGEMENT SCORE - FIXED: Convert decimals to percentages
+        def calc_engagement(row):
+            config = SCORING_CONFIG['engagement']
+            
+            email_open = row.get('hcp_email_open_rate', 0) or 0
+            email_click = row.get('hcp_email_click_rate', 0) or 0
+            wa_read = row.get('hcp_whatsapp_read_rate', 0) or 0
+            wa_click = row.get('hcp_whatsapp_click_rate', 0) or 0
+            call_prod = row.get('hcp_call_productive_rate', 0) or 0
+            call_dur = row.get('average_duration_connected_calls', 0) or 0
+            
+            # CRITICAL FIX: Convert decimals (0-1) to percentages (0-100)
+            if 0 < email_open <= 1:
+                email_open = email_open * 100
+            if 0 < email_click <= 1:
+                email_click = email_click * 100
+            if 0 < wa_read <= 1:
+                wa_read = wa_read * 100
+            if 0 < wa_click <= 1:
+                wa_click = wa_click * 100
+            if 0 < call_prod <= 1:
+                call_prod = call_prod * 100
+            
+            email_score = (email_open * config['email_open_weight'] + 
+                          email_click * config['email_click_weight'])
+            wa_score = (wa_read * config['whatsapp_read_weight'] + 
+                       wa_click * config['whatsapp_click_weight'])
+            
+            call_dur_norm = min((call_dur / 60) * 100, 100) if call_dur > 0 else 0
+            call_score = (call_prod * config['call_productive_weight'] + 
+                         call_dur_norm * config['call_duration_weight'])
+            
+            final = (email_score * config['final_email_weight'] +
+                    wa_score * config['final_whatsapp_weight'] +
+                    call_score * config['final_call_weight'])
+            
+            return round(final, 2)
+        
+        # ACADEMIC SCORE
+        def calc_academic(row):
+            config = SCORING_CONFIG['academic']
+            pubs = row.get('publication_count', 0) or 0
+            trials = row.get('trial_count', 0) or 0
+            acad_assoc = row.get('academic_association_count', 0) or 0
+            
+            pub_score = min(pubs * config['publication_points_per_item'], 
+                          config['publication_max_score'])
+            trial_score = min(trials * config['trial_points_per_item'], 
+                            config['trial_max_score'])
+            assoc_score = min(acad_assoc * config['association_points_per_item'], 
+                            config['association_max_score'])
+            
+            total = pub_score + trial_score + assoc_score
+            return round(min(total, config['max_score']), 2)
+        
+        # SOCIAL MEDIA SCORE
+        def calc_social(row):
+            config = SCORING_CONFIG['social_media']
+            platforms = row.get('platform_count', 0) or 0
+            followers = row.get('total_followers', 0) or 0
+            hc_platforms = row.get('healthcare_platform_count', 0) or 0
+            
+            if followers >= config['follower_min_threshold']:
+                follower_score = min(np.log10(followers) * config['follower_log_multiplier'],
+                                   config['follower_max_score'])
+            else:
+                follower_score = 0
+            
+            platform_score = min(platforms * config['platform_points_per_item'],
+                               config['platform_max_score'])
+            hc_score = min(hc_platforms * config['healthcare_platform_points_per_item'],
+                         config['healthcare_platform_max_score'])
+            
+            total = follower_score + platform_score + hc_score
+            return round(min(total, config['max_score']), 2)
+        
+        # RECOGNITION SCORE
+        def calc_recognition(row):
+            config = SCORING_CONFIG['recognition']
+            awards = row.get('award_count', 0) or 0
+            press = row.get('press_count', 0) or 0
+            events = row.get('event_count', 0) or 0
+            assoc = row.get('association_count', 0) or 0
+            
+            award_score = min(awards * config['award_points_per_item'],
+                           config['award_max_score'])
+            press_score = min(press * config['press_points_per_item'],
+                           config['press_max_score'])
+            event_score = min(events * config['event_points_per_item'],
+                           config['event_max_score'])
+            assoc_score = min(assoc * config['association_points_per_item'],
+                           config['association_max_score'])
+            
+            total = award_score + press_score + event_score + assoc_score
+            return round(min(total, config['max_score']), 2)
+        
+        df['engagement_score'] = df.apply(calc_engagement, axis=1)
+        df['academic_score'] = df.apply(calc_academic, axis=1)
+        df['social_media_score'] = df.apply(calc_social, axis=1)
+        df['recognition_score'] = df.apply(calc_recognition, axis=1)
+        
+        # Data availability flags
+        df['engagement_data_available'] = df['engagement_score'] > 0
+        df['academic_data_available'] = (df['publication_count'] + df['trial_count'] + df['academic_association_count']) > 0
+        df['social_media_data_available'] = (df['platform_count'] + df['healthcare_platform_count'] + df['total_followers']) > 0
+        df['recognition_data_available'] = (df['award_count'] + df['press_count'] + df['event_count'] + df['association_count']) > 0
+        
+        df['buckets_with_data'] = (df['engagement_data_available'].astype(int) +
+                                   df['academic_data_available'].astype(int) +
+                                   df['social_media_data_available'].astype(int) +
+                                   df['recognition_data_available'].astype(int))
+        
+        # Eligibility assessment
+        rules = self.eligibility_rules[self.eligibility_mode]
+        df['eligible_for_clustering'] = (
+            (df['buckets_with_data'] >= rules['min_buckets']) &
+            (df['engagement_data_available'] if rules['engagement_required'] else True)
+        )
+        
+        def get_reason(row):
+            if row['eligible_for_clustering']:
+                return ''
+            reasons = []
+            if rules['engagement_required'] and not row['engagement_data_available']:
+                reasons.append('No engagement data')
+            if row['buckets_with_data'] < rules['min_buckets']:
+                reasons.append(f"Only {int(row['buckets_with_data'])}/{rules['min_buckets']} buckets")
+            return '; '.join(reasons)
+        
+        df['insufficient_data_reason'] = df.apply(get_reason, axis=1)
+        
+        self.log(f"   ✓ Scored {len(df)} doctors")
+        self.log(f"   Avg Engagement: {df['engagement_score'].mean():.2f}")
+        self.log(f"   Avg Academic: {df['academic_score'].mean():.2f}")
+        self.log(f"   Avg Social Media: {df['social_media_score'].mean():.2f}")
+        self.log(f"   Avg Recognition: {df['recognition_score'].mean():.2f}")
+        self.log(f"   Recognition range: {df['recognition_score'].min():.2f} - {df['recognition_score'].max():.2f}")
+        
+        return df
+    
+    def perform_clustering(self, df, n_clusters=6):
+        """Cluster with Cluster 0 for zero-data doctors"""
+        self.log(f"\n🔍 Clustering (k={n_clusters}, mode={self.eligibility_mode})...")
+        
+        zero_data = df[df['buckets_with_data'] == 0].copy()
+        has_data = df[df['buckets_with_data'] > 0].copy()
+        
+        self.log(f"   Zero-data doctors: {len(zero_data)}")
+        self.log(f"   Doctors with data: {len(has_data)}")
+        
+        cluster_profiles = []
+        
+        zero_data['cluster_id'] = 0
+        zero_data['cluster_name'] = 'Cluster 0: No Data'
+        
+        if len(zero_data) > 0:
+            cluster_profiles.append({
+                'cluster_id': 0,
+                'count': len(zero_data),
+                'avg_engagement': 0,
+                'avg_academic': 0,
+                'avg_social_media': 0,
+                'avg_recognition': 0,
+                'cluster_name': 'Cluster 0: No Data'
+            })
+        
+        if len(has_data) >= (n_clusters - 1):
+            score_cols = ['engagement_score', 'academic_score', 'social_media_score', 'recognition_score']
+            for col in score_cols:
+                has_data[col] = has_data[col].fillna(0)
+            
+            features = has_data[score_cols].values
+            features = np.nan_to_num(features, nan=0.0)
+            
+            scaler = StandardScaler()
+            features_scaled = scaler.fit_transform(features)
+            
+            kmeans = KMeans(n_clusters=n_clusters-1, random_state=42, n_init=10)
+            clusters = kmeans.fit_predict(features_scaled)
+            has_data['cluster_id'] = clusters + 1
+            
+            centroids = kmeans.cluster_centers_
+            traits = ['Engagement', 'Academic', 'Social Media', 'Recognition']
+            
+            for i in range(n_clusters - 1):
+                cluster_data = has_data[has_data['cluster_id'] == i+1]
+                centroid = centroids[i]
+                centroid_dict = {traits[j]: centroid[j] for j in range(4)}
+                dominant = max(centroid_dict, key=centroid_dict.get)
+                
+                cluster_name = f"Cluster {i+1}: {dominant}-Focused"
+                has_data.loc[has_data['cluster_id'] == i+1, 'cluster_name'] = cluster_name
+                
+                profile = {
+                    'cluster_id': i+1,
+                    'count': len(cluster_data),
+                    'avg_engagement': cluster_data['engagement_score'].mean(),
+                    'avg_academic': cluster_data['academic_score'].mean(),
+                    'avg_social_media': cluster_data['social_media_score'].mean(),
+                    'avg_recognition': cluster_data['recognition_score'].mean(),
+                    'cluster_name': cluster_name
+                }
+                cluster_profiles.append(profile)
+                self.log(f"   Cluster {i+1}: {len(cluster_data)} doctors - {dominant}-Focused")
+        else:
+            has_data['cluster_id'] = 1
+            has_data['cluster_name'] = 'Cluster 1: Mixed'
+            cluster_profiles.append({
+                'cluster_id': 1,
+                'count': len(has_data),
+                'avg_engagement': has_data['engagement_score'].mean(),
+                'avg_academic': has_data['academic_score'].mean(),
+                'avg_social_media': has_data['social_media_score'].mean(),
+                'avg_recognition': has_data['recognition_score'].mean(),
+                'cluster_name': 'Cluster 1: Mixed'
+            })
+        
+        result = pd.concat([zero_data, has_data], ignore_index=True)
+        return result, cluster_profiles
+    
+    def generate_output(self, df, cluster_profiles):
+        """Save results - INCLUDING clinic_city - COMPLETE"""
+        self.log("\n💾 Generating Output...")
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_file = os.path.join(self.output_folder, f'psims_results_{timestamp}.csv')
+        
+        # Include clinic_city in output
+        output_cols = ['uin', 'full_name', 'specialty', 'mobile', 'clinic_city',
+                      'engagement_score', 'engagement_data_available',
+                      'academic_score', 'academic_data_available',
+                      'social_media_score', 'social_media_data_available',
+                      'recognition_score', 'recognition_data_available',
+                      'buckets_with_data', 'eligible_for_clustering',
+                      'cluster_id', 'cluster_name', 'insufficient_data_reason']
+        
+        output_cols = [c for c in output_cols if c in df.columns]
+        output_df = df[output_cols]
+        
+        output_df.to_csv(output_file, index=False, encoding='utf-8')
+        self.log(f"   ✓ Saved: {output_file}")
+        
+        # Save cluster profiles
+        if cluster_profiles:
+            profiles_df = pd.DataFrame(cluster_profiles)
+            profiles_file = os.path.join(self.output_folder, f'cluster_profiles_{timestamp}.csv')
+            profiles_df.to_csv(profiles_file, index=False, encoding='utf-8')
+            self.log(f"   ✓ Saved: {profiles_file}")
+            
+            # Display cluster summary
+            self.log("\n📊 Cluster Summary:")
+            for _, profile in profiles_df.iterrows():
+                self.log(f"   • {profile['cluster_name']}: {profile['count']} physicians")
+                self.log(f"      Eng: {profile['avg_engagement']:.2f} | Acad: {profile['avg_academic']:.2f} | Social: {profile['avg_social_media']:.2f} | Recog: {profile['avg_recognition']:.2f}")
+        
+        # Generate detailed summary statistics
+        summary_file = os.path.join(self.output_folder, f'summary_stats_{timestamp}.txt')
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            f.write("=" * 70 + "\n")
+            f.write("PSIMS ANALYSIS SUMMARY REPORT\n")
+            f.write("=" * 70 + "\n\n")
+            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Eligibility Mode: {self.eligibility_mode.upper()}\n\n")
+            
+            f.write("-" * 70 + "\n")
+            f.write("OVERALL STATISTICS\n")
+            f.write("-" * 70 + "\n")
+            f.write(f"Total Physicians Analyzed: {len(df)}\n")
+            f.write(f"Eligible for Clustering: {df['eligible_for_clustering'].sum()}\n")
+            f.write(f"Insufficient Data: {(~df['eligible_for_clustering']).sum()}\n\n")
+            
+            f.write("-" * 70 + "\n")
+            f.write("DATA AVAILABILITY BY BUCKET\n")
+            f.write("-" * 70 + "\n")
+            f.write(f"Engagement Data Available: {df['engagement_data_available'].sum()} ({df['engagement_data_available'].sum()/len(df)*100:.1f}%)\n")
+            f.write(f"Academic Data Available: {df['academic_data_available'].sum()} ({df['academic_data_available'].sum()/len(df)*100:.1f}%)\n")
+            f.write(f"Social Media Data Available: {df['social_media_data_available'].sum()} ({df['social_media_data_available'].sum()/len(df)*100:.1f}%)\n")
+            f.write(f"Recognition Data Available: {df['recognition_data_available'].sum()} ({df['recognition_data_available'].sum()/len(df)*100:.1f}%)\n\n")
+            
+            f.write("-" * 70 + "\n")
+            f.write("AVERAGE SCORES\n")
+            f.write("-" * 70 + "\n")
+            f.write(f"Engagement Score: {df['engagement_score'].mean():.2f} (Range: {df['engagement_score'].min():.2f} - {df['engagement_score'].max():.2f})\n")
+            f.write(f"Academic Score: {df['academic_score'].mean():.2f} (Range: {df['academic_score'].min():.2f} - {df['academic_score'].max():.2f})\n")
+            f.write(f"Social Media Score: {df['social_media_score'].mean():.2f} (Range: {df['social_media_score'].min():.2f} - {df['social_media_score'].max():.2f})\n")
+            f.write(f"Recognition Score: {df['recognition_score'].mean():.2f} (Range: {df['recognition_score'].min():.2f} - {df['recognition_score'].max():.2f})\n\n")
+            
+            if cluster_profiles:
+                f.write("-" * 70 + "\n")
+                f.write("CLUSTER DISTRIBUTION\n")
+                f.write("-" * 70 + "\n")
+                for profile in cluster_profiles:
+                    pct = (profile['count'] / len(df)) * 100
+                    f.write(f"\n{profile['cluster_name']}\n")
+                    f.write(f"  Size: {profile['count']} physicians ({pct:.1f}%)\n")
+                    f.write(f"  Avg Engagement: {profile['avg_engagement']:.2f}\n")
+                    f.write(f"  Avg Academic: {profile['avg_academic']:.2f}\n")
+                    f.write(f"  Avg Social Media: {profile['avg_social_media']:.2f}\n")
+                    f.write(f"  Avg Recognition: {profile['avg_recognition']:.2f}\n")
+            
+            # Bucket distribution
+            f.write("\n" + "-" * 70 + "\n")
+            f.write("BUCKET DISTRIBUTION\n")
+            f.write("-" * 70 + "\n")
+            bucket_dist = df['buckets_with_data'].value_counts().sort_index()
+            for buckets, count in bucket_dist.items():
+                pct = (count / len(df)) * 100
+                f.write(f"{int(buckets)} bucket(s): {count} physicians ({pct:.1f}%)\n")
+            
+            f.write("\n" + "=" * 70 + "\n")
+        
+        self.log(f"   ✓ Saved: {summary_file}")
+        
+        return output_file, profiles_file if cluster_profiles else None, summary_file
+    
+    def run_analysis(self, n_clusters=6):
+        """Execute complete analysis pipeline"""
+        self.log("\n" + "="*60)
+        self.log("🚀 STARTING PSIMS ANALYSIS")
+        self.log("="*60)
+        
+        self.load_all_data()
+        aggregated = self.aggregate_by_uin()
+        
+        if aggregated.empty:
+            self.log("\n❌ No data to analyze")
+            return None, None, None
+        
+        scored = self.calculate_scores(aggregated)
+        clustered, profiles = self.perform_clustering(scored, n_clusters)
+        
+        output_file, profiles_file, summary_file = self.generate_output(clustered, profiles)
+        
+        self.log("\n" + "="*60)
+        self.log("✅ ANALYSIS COMPLETE!")
+        self.log("="*60)
+        
+        return output_file, profiles_file, summary_file
+
+
+# =====================================================
+# TKINTER GUI APPLICATION
+# =====================================================
+
+class PSImsGUI:
+    """Complete GUI for PSIMS system"""
+    
+    def __init__(self, root):
+        self.root = root
+        self.root.title("PSIMS v2.1 - Physician Segmentation & Intelligence Management")
+        self.root.geometry("900x700")
+        
+        self.config = PSImsConfig()
+        
+        # Setup UI
+        self.create_widgets()
+        self.load_saved_paths()
+    
+    def create_widgets(self):
+        """Create all UI widgets"""
+        
+        # Title
+        title_frame = tk.Frame(self.root, bg='#2c3e50', height=60)
+        title_frame.pack(fill='x')
+        title_frame.pack_propagate(False)
+        
+        tk.Label(title_frame, text="PSIMS v2.1", 
+                font=('Arial', 20, 'bold'), bg='#2c3e50', fg='white').pack(pady=10)
+        
+        # Main container
+        main_frame = tk.Frame(self.root, padx=20, pady=20)
+        main_frame.pack(fill='both', expand=True)
+        
+        # === STEP 1: FOLDER SELECTION ===
+        step1_frame = tk.LabelFrame(main_frame, text="Step 1: Select Folders", 
+                                    font=('Arial', 11, 'bold'), padx=10, pady=10)
+        step1_frame.pack(fill='x', pady=(0, 10))
+        
+        # Input folder
+        tk.Label(step1_frame, text="Input Folder (Excel files):").grid(row=0, column=0, sticky='w', pady=5)
+        self.input_folder_var = tk.StringVar()
+        tk.Entry(step1_frame, textvariable=self.input_folder_var, width=50).grid(row=0, column=1, padx=5)
+        tk.Button(step1_frame, text="Browse", command=self.browse_input).grid(row=0, column=2)
+        
+        # CSV output folder
+        tk.Label(step1_frame, text="CSV Output Folder:").grid(row=1, column=0, sticky='w', pady=5)
+        self.csv_folder_var = tk.StringVar()
+        tk.Entry(step1_frame, textvariable=self.csv_folder_var, width=50).grid(row=1, column=1, padx=5)
+        tk.Button(step1_frame, text="Browse", command=self.browse_csv_output).grid(row=1, column=2)
+        
+        # Results output folder
+        tk.Label(step1_frame, text="Results Output Folder:").grid(row=2, column=0, sticky='w', pady=5)
+        self.results_folder_var = tk.StringVar()
+        tk.Entry(step1_frame, textvariable=self.results_folder_var, width=50).grid(row=2, column=1, padx=5)
+        tk.Button(step1_frame, text="Browse", command=self.browse_results_output).grid(row=2, column=2)
+        
+        # === STEP 2: CONVERSION ===
+        step2_frame = tk.LabelFrame(main_frame, text="Step 2: Convert Excel to CSV", 
+                                    font=('Arial', 11, 'bold'), padx=10, pady=10)
+        step2_frame.pack(fill='x', pady=(0, 10))
+        
+        tk.Button(step2_frame, text="🔄 Convert Files", command=self.convert_files,
+                 bg='#3498db', fg='white', font=('Arial', 10, 'bold'),
+                 width=20, height=2).pack(pady=10)
+        
+        # === STEP 3: ANALYSIS SETTINGS ===
+        step3_frame = tk.LabelFrame(main_frame, text="Step 3: Analysis Settings", 
+                                    font=('Arial', 11, 'bold'), padx=10, pady=10)
+        step3_frame.pack(fill='x', pady=(0, 10))
+        
+        settings_inner = tk.Frame(step3_frame)
+        settings_inner.pack(fill='x', pady=5)
+        
+        tk.Label(settings_inner, text="Eligibility Mode:").grid(row=0, column=0, sticky='w', padx=5)
+        self.eligibility_var = tk.StringVar(value='relaxed')
+        eligibility_combo = ttk.Combobox(settings_inner, textvariable=self.eligibility_var,
+                                        values=['strict', 'moderate', 'relaxed', 'basic'],
+                                        state='readonly', width=15)
+        eligibility_combo.grid(row=0, column=1, padx=5)
+        
+        tk.Label(settings_inner, text="Number of Clusters:").grid(row=0, column=2, sticky='w', padx=5)
+        self.clusters_var = tk.StringVar(value='6')
+        tk.Spinbox(settings_inner, from_=3, to=10, textvariable=self.clusters_var, 
+                  width=10).grid(row=0, column=3, padx=5)
+        
+        tk.Button(step3_frame, text="▶️ Run Analysis", command=self.run_analysis,
+                 bg='#27ae60', fg='white', font=('Arial', 10, 'bold'),
+                 width=20, height=2).pack(pady=10)
+        
+        # === LOG OUTPUT ===
+        log_frame = tk.LabelFrame(main_frame, text="Process Log", 
+                                 font=('Arial', 11, 'bold'), padx=10, pady=10)
+        log_frame.pack(fill='both', expand=True)
+        
+        self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, 
+                                                  font=('Courier', 9), height=15)
+        self.log_text.pack(fill='both', expand=True)
+    
+    def browse_input(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.input_folder_var.set(folder)
+            self.config.update_folder('input_folder', folder)
+    
+    def browse_csv_output(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.csv_folder_var.set(folder)
+            self.config.update_folder('csv_output', folder)
+    
+    def browse_results_output(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.results_folder_var.set(folder)
+            self.config.update_folder('results_output', folder)
+    
+    def load_saved_paths(self):
+        """Load saved folder paths"""
+        self.input_folder_var.set(self.config.get_folder('input_folder'))
+        self.csv_folder_var.set(self.config.get_folder('csv_output'))
+        self.results_folder_var.set(self.config.get_folder('results_output'))
+    
+    def log(self, message):
+        """Display message in log"""
+        self.log_text.insert(tk.END, message + '\n')
+        self.log_text.see(tk.END)
+        self.root.update()
+    
+    def convert_files(self):
+        """Execute conversion process"""
+        input_folder = self.input_folder_var.get()
+        csv_folder = self.csv_folder_var.get()
+        
+        if not input_folder or not csv_folder:
+            messagebox.showerror("Error", "Please select input and CSV output folders")
+            return
+        
+        if not os.path.exists(input_folder):
+            messagebox.showerror("Error", "Input folder does not exist")
+            return
+        
+        os.makedirs(csv_folder, exist_ok=True)
+        
+        self.log_text.delete(1.0, tk.END)
+        self.log("Starting conversion process...")
+        
+        try:
+            # Find Excel files
+            excel_files = [f for f in os.listdir(input_folder) if f.endswith(('.xlsx', '.xls'))]
+            
+            if not excel_files:
+                messagebox.showwarning("Warning", "No Excel files found in input folder")
+                return
+            
+            self.log(f"Found {len(excel_files)} Excel files")
+            
+            # Separate PI batches and engagement files
+            pi_files = []
+            engagement_files = []
+            
+            for file in excel_files:
+                file_lower = file.lower()
+                if 'pi' in file_lower and 'batch' in file_lower:
+                    pi_files.append(os.path.join(input_folder, file))
+                elif any(month in file_lower for month in ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 
+                                                            'jul', 'aug', 'sep', 'oct', 'nov', 'dec']):
+                    engagement_files.append(os.path.join(input_folder, file))
+            
+            self.log(f"Identified: {len(pi_files)} PI files, {len(engagement_files)} engagement files")
+            
+            # Convert
+            converter = SmartConverter(csv_folder, log_callback=self.log)
+            
+            if pi_files:
+                converter.combine_pi_batches(pi_files)
+            
+            if engagement_files:
+                converter.convert_engagement_files(engagement_files)
+            
+            warnings = converter.get_warnings()
+            
+            self.log("\n✅ Conversion Complete!")
+            if warnings:
+                self.log(f"\n⚠️  {len(warnings)} warnings generated")
+            
+            messagebox.showinfo("Success", f"Conversion complete!\n{len(pi_files)} PI files + {len(engagement_files)} engagement files processed")
+            
+        except Exception as e:
+            self.log(f"\n❌ Error: {str(e)}")
+            messagebox.showerror("Error", f"Conversion failed: {str(e)}")
+    
+    def run_analysis(self):
+        """Execute analysis process"""
+        csv_folder = self.csv_folder_var.get()
+        results_folder = self.results_folder_var.get()
+        
+        if not csv_folder or not results_folder:
+            messagebox.showerror("Error", "Please select CSV and results folders")
+            return
+        
+        if not os.path.exists(csv_folder):
+            messagebox.showerror("Error", "CSV folder does not exist. Run conversion first.")
+            return
+        
+        os.makedirs(results_folder, exist_ok=True)
+        
+        self.log_text.delete(1.0, tk.END)
+        
+        try:
+            n_clusters = int(self.clusters_var.get())
+            eligibility_mode = self.eligibility_var.get()
+            
+            engine = PSImsEngine(csv_folder, results_folder, 
+                               log_callback=self.log,
+                               eligibility_mode=eligibility_mode)
+            
+            output_file, profiles_file, summary_file = engine.run_analysis(n_clusters)
+            
+            if output_file:
+                messagebox.showinfo("Success", 
+                    f"Analysis Complete!\n\n"
+                    f"Results saved to:\n{results_folder}\n\n"
+                    f"Files generated:\n"
+                    f"- {os.path.basename(output_file)}\n"
+                    f"- {os.path.basename(profiles_file) if profiles_file else 'N/A'}\n"
+                    f"- {os.path.basename(summary_file)}")
+            else:
+                messagebox.showwarning("Warning", "Analysis completed but no output generated")
+                
+        except Exception as e:
+            self.log(f"\n❌ Error: {str(e)}")
+            import traceback
+            self.log(traceback.format_exc())
+            messagebox.showerror("Error", f"Analysis failed: {str(e)}")
+
+
+# =====================================================
+# MAIN EXECUTION
+# =====================================================
+
+def main():
+    """Launch PSIMS application"""
+    root = tk.Tk()
+    app = PSImsGUI(root)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
+
+    

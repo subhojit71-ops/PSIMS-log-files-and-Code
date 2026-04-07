@@ -1,0 +1,160 @@
+================================================================================
+PSIMS ANALYSIS SUMMARY REPORT
+================================================================================
+
+Generated: 2025-12-10 15:04:35
+Eligibility Mode: RELAXED
+Require Engagement: False
+Naming Method: combined
+Specialty Filter: All Specialties
+Thresholds: High=30, Low=15
+
+--------------------------------------------------------------------------------
+OVERALL STATISTICS
+--------------------------------------------------------------------------------
+Total Physicians: 10000
+Eligible for Clustering: 10000
+Insufficient Data: 0
+
+--------------------------------------------------------------------------------
+DATA AVAILABILITY
+--------------------------------------------------------------------------------
+Engagement: 5293 (52.9%)
+Academic: 10000 (100.0%)
+Social Media: 10000 (100.0%)
+Recognition: 2911 (29.1%)
+
+--------------------------------------------------------------------------------
+SCORE STATISTICS
+--------------------------------------------------------------------------------
+
+Engagement:
+  Mean: 12.83
+  Median: 9.52
+  Std Dev: 14.28
+  Min: 0.00
+  Max: 62.95
+
+Academic:
+  Mean: 12.17
+  Median: 10.00
+  Std Dev: 8.74
+  Min: 10.00
+  Max: 100.00
+
+Social Media:
+  Mean: 16.54
+  Median: 10.00
+  Std Dev: 12.47
+  Min: 10.00
+  Max: 69.78
+
+Recognition:
+  Mean: 6.17
+  Median: 0.00
+  Std Dev: 13.01
+  Min: 0.00
+  Max: 100.00
+
+--------------------------------------------------------------------------------
+CLUSTER DETAILS
+--------------------------------------------------------------------------------
+
+Cluster 1: Low Activity Profile
+  Size: 4293 physicians (42.9%)
+  Avg Engagement: 1.30
+  Avg Academic: 10.37
+  Avg Social Media: 11.65
+  Avg Recognition: 1.15
+
+Cluster 2: Social Media-Focused
+  Size: 1031 physicians (10.3%)
+  Avg Engagement: 14.23
+  Avg Academic: 11.19
+  Avg Social Media: 48.15
+  Avg Recognition: 6.84
+
+Cluster 3: Moderate Engagement
+  Size: 3202 physicians (32.0%)
+  Avg Engagement: 27.59
+  Avg Academic: 10.57
+  Avg Social Media: 12.27
+  Avg Recognition: 1.58
+
+Cluster 4: Academic-Focused
+  Size: 313 physicians (3.1%)
+  Avg Engagement: 14.66
+  Avg Academic: 55.94
+  Avg Social Media: 22.93
+  Avg Recognition: 21.74
+
+Cluster 5: Moderate Recognition
+  Size: 822 physicians (8.2%)
+  Avg Engagement: 13.20
+  Avg Academic: 11.74
+  Avg Social Media: 13.50
+  Avg Recognition: 24.49
+
+Cluster 6: Recognition-Focused
+  Size: 339 physicians (3.4%)
+  Avg Engagement: 12.38
+  Avg Academic: 13.75
+  Avg Social Media: 24.09
+  Avg Recognition: 52.41
+
+--------------------------------------------------------------------------------
+CLUSTER QUALITY METRICS
+--------------------------------------------------------------------------------
+Silhouette Score: 0.524
+Quality: Good - Reasonable cluster structure
+
+--------------------------------------------------------------------------------
+ACTIVE SCORING PARAMETERS (WEIGHTS & THRESHOLDS)
+--------------------------------------------------------------------------------
+
+[ENGAGEMENT]
+  Email Open Weight: 0.5
+  Email Click Weight: 0.5
+  Whatsapp Read Weight: 0.5
+  Whatsapp Click Weight: 0.5
+  Call Productive Weight: 0.7
+  Call Duration Weight: 0.3
+  Final Email Weight: 0.33
+  Final Whatsapp Weight: 0.33
+  Final Call Weight: 0.34
+  Max Score: 100
+
+[ACADEMIC]
+  Publication Points Per Item: 10
+  Publication Max Score: 50
+  Trial Points Per Item: 20
+  Trial Max Score: 30
+  Association Points Per Item: 10
+  Association Max Score: 20
+  Max Score: 100
+  Baseline Threshold: 10
+
+[SOCIAL MEDIA]
+  Follower Log Multiplier: 10
+  Follower Max Score: 50
+  Follower Min Threshold: 100
+  Platform Points Per Item: 10
+  Platform Max Score: 30
+  Healthcare Platform Points Per Item: 10
+  Healthcare Platform Max Score: 20
+  Max Score: 100
+
+[RECOGNITION]
+  Award Points Per Item: 15
+  Award Max Score: 30
+  Press Points Per Item: 10
+  Press Max Score: 25
+  Event Points Per Item: 8
+  Event Max Score: 25
+  Association Points Per Item: 5
+  Association Max Score: 20
+  Max Score: 100
+
+================================================================================
+END OF REPORT
+================================================================================

@@ -1,0 +1,23 @@
+1. Option B
+example: client_doctor_code,campaign_start_date_(month_year),hcp_email_open_rate,hcp_whatsapp_read_rate,hcp_email_click_rate,hcp_whatsapp_click_rate,hcp_call_productive_rate,last_call_connected_date_(selected_month),average_duration_connected_calls
+AP000127,2025-01-01,0.6666666666666666,,,,,,
+AP000130,2025-01-01,1.0,1.0,,,,,
+AP000239,2025-01-01,,1.0,,,,,
+AP000412,2025-01-01,,1.0,,,,,
+AP000453,2025-01-01,0.75,,,,,,
+AP000470,2025-01-01,0.5,1.0,,,,,
+AP000485,2025-01-01,0.8333333333333334,1.0,,,,,
+AP000512,2025-01-01,0.25,,,,,,
+AP000514,2025-01-01,1.0,1.0,,,,,
+AP000546,2025-01-01,,0.5,,,,,
+AP000577,2025-01-01,,1.0,,,,,
+AP000639,2025-01-01,,1.0,,,,,
+AP000680,2025-01-01,0.5,0.75,,0.25,,,
+AP000688,2025-01-01,,1.0,,,,,
+
+1. So the thing is the data is populated for certain number of UINs and the rest are empty and the one's which have empty data only have the UIN.
+Sample from association.csv: ""
+2. I think the issues is for all the sheets the system is neglecting duplicates please verify this with the code and tell me, since when I checked in the files you mentioned I do not see duplicates.
+
+3. Yes all doctors have one publication. Maybe the no duplication rule while appending the data and csv conversion is affecting our scoring since we are taking UIN count. So for certain sheets we need to allow repetition of the same UIN. Cross check and verify my claim.
+4. clinics.csv has clinic_city

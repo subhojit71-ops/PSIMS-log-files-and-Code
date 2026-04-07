@@ -1,0 +1,6 @@
+config = {
+    'host': 'localhost',
+    'user': 'root',  # Your MySQL username
+    'password': 'Xenowerk@287',  # YOUR PASSWORD HERE
+    'database': 'psims',  # YOUR DATABASE NAME
+}

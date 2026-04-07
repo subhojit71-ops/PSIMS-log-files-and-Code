@@ -1,0 +1,32 @@
+import pandas as pd
+import mysql.connector
+
+# Load CSV
+df = pd.read_csv(r"C:\Test_Data_OG.csv")
+
+# Connect to MySQL
+conn = mysql.connector.connect(
+    host="localhost",
+    user="root",
+    password="yourpassword",
+    database="psims"
+)
+cursor = conn.cursor()
+
+# Insert data row by row
+for _, row in df.iterrows():
+    cursor.execute("""
+        INSERT INTO doctors
+        (UIN, MCI_no, MCI_state, first_name, middle_name, last_name, full_name,
+         uin_specialty, specialty, subspeciality, qualification, years_of_exp,
+         work_phone_1, work_phone_2, mobile, whatsapp_phone, email_id_1, email_id_2,
+         biography, primary_institution, primary_department, primary_position,
+         clinic_address, clinic_postal_code, dr_city, dr_state, dr_country,
+         area_of_interest, hobbies)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, tuple(row))
+    
+conn.commit()
+cursor.close()
+conn.close()

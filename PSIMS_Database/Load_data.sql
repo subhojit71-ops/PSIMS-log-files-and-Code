@@ -1,0 +1,9 @@
+use psims;
+LOAD DATA LOCAL INFILE 'C:/temp/test.csv'
+INTO TABLE doctors
+FIELDS TERMINATED BY ',' 
+ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(UIN, MCI_no, first_name);
+

@@ -1,0 +1,53 @@
+{
+    "paths": {
+        "excel_input_folder": "C:\\PSIms\\Input\\Excel",
+        "csv_data_folder": "C:\\PSIms\\Output",
+        "output_folder": "C:\\PSIms\\Output",
+        "archive_folder": "C:\\PSIms\\Output"
+    },
+    "excel_files": {
+        "main_data_file": "Batch_1_5000_HCPs_Profiles_22July2025",
+        "sheet_mapping": {
+            "Jan25": "Jan25.csv",
+            "Feb25": "Feb25.csv",
+            "March25": "March25.csv",
+            "April25": "April25.csv",
+            "May25": "May25.csv",
+            "June25": "June25.csv",
+            "July25": "July25.csv",
+            "PI": "pi.csv",
+            "Clinics": "clinics.csv",
+            "Publications": "Publications.csv",
+            "Trials": "Trials.csv",
+            "Academic_Association": "Academic_association.csv",
+            "Digital": "digital.csv",
+            "Healthcare_Platforms": "Healthcare.csv",
+            "Awards": "awards.csv",
+            "Press": "press.csv",
+            "Events": "events.csv",
+            "Associations": "association.csv"
+        }
+    },
+    "processing": {
+        "auto_backup": true,
+        "timestamp_outputs": true,
+        "validate_data": true
+    },
+    "folders": {
+        "input_folder": "D:/Lupin_D360/Beta_Input",
+        "csv_output": "D:/Lupin_D360/Beta_Output",
+        "results_output": "D:/Lupin_D360/Beta_Result"
+    },
+    "settings": {
+        "eligibility_mode": "strict",
+        "num_clusters": 5,
+        "require_engagement": false,
+        "zero_data_position": "first",
+        "naming_method": "absolute",
+        "high_threshold": 30,
+        "low_threshold": 15,
+        "show_quality_metrics": true,
+        "generate_visualizations": true
+    },
+    "last_run": null
+}
